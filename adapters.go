@@ -27,9 +27,9 @@ func (s ServiceAccount) JWTConfig(scopes ...string) (*jwt.Config, error) {
 }
 
 // AuthCredentials creates credentials for cloud.google.com/go clients.
-func (s ServiceAccount) AuthCredentials(opts *credentials.DetectOptions) (*auth.Credentials, error) {
+func (s ServiceAccount) AuthCredentials(scopes ...string) (*auth.Credentials, error) {
 	if len(s.canonical) == 0 {
 		return nil, errors.New("google credential: uninitialized service account")
 	}
-	return credentials.NewCredentialsFromJSON(credentials.ServiceAccount, s.canonical, opts)
+	return credentials.NewCredentialsFromJSON(credentials.ServiceAccount, s.canonical, &credentials.DetectOptions{Scopes: append([]string(nil), scopes...)})
 }

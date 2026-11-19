@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"cloud.google.com/go/auth/credentials"
 )
 
 func validKey(t *testing.T) map[string]any {
@@ -70,7 +68,7 @@ func TestParseServiceAccountJSONAndAdapters(t *testing.T) {
 	if err != nil || cfg.TokenURL != TokenURL {
 		t.Fatalf("JWTConfig: cfg=%v err=%v", cfg, err)
 	}
-	if _, err := parsed.AuthCredentials(&credentials.DetectOptions{Scopes: []string{"https://www.googleapis.com/auth/cloud-platform"}}); err != nil {
+	if _, err := parsed.AuthCredentials("https://www.googleapis.com/auth/cloud-platform"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -156,7 +154,7 @@ func TestZeroValueCannotCreateAdapter(t *testing.T) {
 	if _, err := empty.JWTConfig(); err == nil {
 		t.Fatal("zero-value JWTConfig accepted")
 	}
-	if _, err := empty.AuthCredentials(&credentials.DetectOptions{}); err == nil {
+	if _, err := empty.AuthCredentials(); err == nil {
 		t.Fatal("zero-value AuthCredentials accepted")
 	}
 }
