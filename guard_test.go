@@ -23,11 +23,14 @@ func validKey(t *testing.T) map[string]any {
 	}
 	return map[string]any{
 		"type": "service_account", "project_id": "test-project", "private_key_id": "test-key",
-		"private_key":          string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
-		"client_email":         "test@test-project.iam.gserviceaccount.com",
-		"token_uri":            TokenURL,
-		"auth_uri":             "https://accounts.google.com/o/oauth2/auth",
-		"client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/test",
+		"private_key":                 string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email":                "test@test-project.iam.gserviceaccount.com",
+		"client_id":                   "123456789012345678901",
+		"token_uri":                   TokenURL,
+		"auth_uri":                    "https://accounts.google.com/o/oauth2/auth",
+		"auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+		"client_x509_cert_url":        "https://www.googleapis.com/robot/v1/metadata/x509/test",
+		"universe_domain":             "googleapis.com",
 	}
 }
 
@@ -73,6 +76,71 @@ func TestParseServiceAccountJSONAndAdapters(t *testing.T) {
 	}
 }
 
+func TestParseServiceAccountJSONAcceptsGoogleIssuedTokenURLs(t *testing.T) {
+	for _, inputURL := range []string{TokenURL, AccountsTokenURL} {
+		t.Run(inputURL, func(t *testing.T) {
+			input := validKey(t)
+			input["token_uri"] = inputURL
+			parsed, err := ParseServiceAccountJSON(encode(t, input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var canonical map[string]any
+			if err := json.Unmarshal(parsed.CanonicalJSON(), &canonical); err != nil {
+				t.Fatal(err)
+			}
+			if canonical["token_uri"] != TokenURL {
+				t.Fatalf("canonical token URI = %v", canonical["token_uri"])
+			}
+			cfg, err := parsed.JWTConfig("https://www.googleapis.com/auth/cloud-platform")
+			if err != nil || cfg.TokenURL != TokenURL {
+				t.Fatalf("JWTConfig used unexpected token URI: cfg=%v err=%v", cfg, err)
+			}
+		})
+	}
+}
+
+func TestParseServiceAccountJSONNormalizesRSAPKCS1Key(t *testing.T) {
+	input := validKey(t)
+	block, _ := pem.Decode([]byte(input["private_key"].(string)))
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input["private_key"] = string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key.(*rsa.PrivateKey)),
+	}))
+	parsed, err := ParseServiceAccountJSON(encode(t, input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical map[string]any
+	if err := json.Unmarshal(parsed.CanonicalJSON(), &canonical); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(canonical["private_key"].(string), "-----BEGIN PRIVATE KEY-----") {
+		t.Fatal("PKCS#1 key was not normalized to PKCS#8")
+	}
+	if _, err := parsed.JWTConfig("https://www.googleapis.com/auth/cloud-platform"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseServiceAccountJSONReportsOnlySafeUnknownFieldNames(t *testing.T) {
+	input := validKey(t)
+	input["future_google_field"] = "value"
+	_, err := ParseServiceAccountJSON(encode(t, input))
+	if err == nil || !strings.Contains(err.Error(), "future_google_field") {
+		t.Fatalf("ordinary unknown field not identified: %v", err)
+	}
+	delete(input, "future_google_field")
+	input["private_key\nsecret"] = "value"
+	_, err = ParseServiceAccountJSON(encode(t, input))
+	if err == nil || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("unsafe field name echoed: %v", err)
+	}
+}
+
 func TestParseServiceAccountJSONRejectsUnsafeConfigurations(t *testing.T) {
 	base := validKey(t)
 	cases := map[string]func(map[string]any){
@@ -91,6 +159,7 @@ func TestParseServiceAccountJSONRejectsUnsafeConfigurations(t *testing.T) {
 		},
 		"authorized user":     func(m map[string]any) { m["type"] = "authorized_user" },
 		"hostile token URI":   func(m map[string]any) { m["token_uri"] = "https://example.invalid/token" },
+		"lookalike token URI": func(m map[string]any) { m["token_uri"] = AccountsTokenURL + "?next=https://example.invalid" },
 		"nondefault universe": func(m map[string]any) { m["universe_domain"] = "example.invalid" },
 		"missing key":         func(m map[string]any) { delete(m, "private_key") },
 		"invalid key":         func(m map[string]any) { m["private_key"] = "not a key" },
