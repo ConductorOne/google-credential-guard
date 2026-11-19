@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -120,6 +121,7 @@ func TestParseServiceAccountJSONRejectsParserAmbiguity(t *testing.T) {
 	base := encode(t, validKey(t))
 	cases := [][]byte{
 		[]byte(`{"type":"service_account","type":"external_account"}`),
+		[]byte(`{"type":"service_account","\u0074ype":"external_account"}`),
 		[]byte(`{"type":"external_account","type":"service_account"}`),
 		append(append([]byte{}, base...), []byte(` {}`)...),
 		[]byte(`[]`),
@@ -130,6 +132,18 @@ func TestParseServiceAccountJSONRejectsParserAmbiguity(t *testing.T) {
 	for i, input := range cases {
 		if _, err := ParseServiceAccountJSON(input); err == nil {
 			t.Fatalf("ambiguous or oversized case %d accepted", i)
+		}
+	}
+}
+
+func TestFormattedValueRedactsKeyMaterial(t *testing.T) {
+	parsed, err := ParseServiceAccountJSON(encode(t, validKey(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rendered := range []string{fmt.Sprint(parsed), fmt.Sprintf("%+v", parsed), fmt.Sprintf("%#v", parsed)} {
+		if strings.Contains(rendered, "PRIVATE KEY") || strings.Contains(rendered, "test-key") {
+			t.Fatalf("credential leaked in formatted value: %s", rendered)
 		}
 	}
 }
